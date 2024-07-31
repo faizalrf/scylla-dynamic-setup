@@ -1,0 +1,140 @@
+---
+- name: Install Docker on new VM
+  hosts: monitor
+  become: yes
+  gather_facts: yes
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    scylla_monitoring_version: 4.8.0
+    scylla_monitoring_url: "https://github.com/scylladb/scylla-monitoring/archive/{{ scylla_monitoring_version }}.tar.gz"
+    scylla_monitoring_dir: "scylla-monitoring-{{ scylla_monitoring_version }}"
+    scylla_destination_dir: "/home/ubuntu"
+    scylla_monitoring_path: "{{ scylla_destination_dir }}/{{ scylla_monitoring_dir }}"
+
+  tasks:
+    - name: Remove conflicting container packages
+      apt:
+        name: "{{ item }}"
+        state: absent
+        purge: yes
+      loop:
+        - docker.io
+        - docker-doc
+        - docker-compose
+        - docker-compose-v2
+        - podman-docker
+        - containerd
+        - runc
+
+    - name: Update the apt package index
+      apt:
+        update_cache: yes
+
+    - name: Install packages to allow apt to use a repository over HTTPS
+      apt:
+        name:
+          - ca-certificates
+          - curl
+        state: present
+
+    - name: Create the /etc/apt/keyrings directory
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Add Docker’s official GPG key
+      get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: '0644'
+
+    - name: Add the Docker repository to Apt sources
+      shell: |
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+      args:
+        executable: /bin/bash
+
+    - name: Update the apt package index again
+      apt:
+        update_cache: yes
+
+    - name: Install Docker Engine and related packages
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+
+    - name: Start and enable Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Add ubuntu user to docker group
+      user:
+        name: ubuntu
+        groups: docker
+        append: yes
+
+    - name: Download Scylla Monitoring package
+      get_url:
+        url: "{{ scylla_monitoring_url }}"
+        dest: "/tmp/{{ scylla_monitoring_version }}.tar.gz"
+
+    - name: Extract Scylla Monitoring package
+      unarchive:
+        src: "/tmp/{{ scylla_monitoring_version }}.tar.gz"
+        dest: "{{ scylla_destination_dir }}"
+        remote_src: yes
+        creates: "{{ scylla_monitoring_path }}"
+
+    - name: Ensure Docker service is restarted
+      systemd:
+        name: docker
+        state: restarted
+
+    - name: Get the DC value from any Scylla host
+      set_fact:
+        dc_value: "{{ hostvars[groups['scylla'][0]]['dc'] }}"
+
+    - name: Create prometheus/scylla_servers.yml
+      block:
+        - name: Create prometheus directory
+          file:
+            path: "{{ scylla_monitoring_path }}/prometheus"
+            state: directory
+
+        - name: Create scylla_servers.yml with IPs and DC from inventory
+          copy:
+            dest: "{{ scylla_monitoring_path }}/prometheus/scylla_servers.yml"
+            content: |
+              - targets:
+              {% for host in groups['scylla'] %}
+                - {{ host }}
+              {% endfor %}
+                labels:
+                  cluster: cluster1
+                  dc: {{ dc_value }}
+
+    - name: Set ownership of Scylla Monitoring directory
+      file:
+        path: "{{ scylla_monitoring_path }}"
+        state: directory
+        recurse: yes
+        owner: ubuntu
+        group: ubuntu
+
+    - name: Run kill-all.sh
+      command: ./kill-all.sh
+      args:
+        chdir: "{{ scylla_monitoring_path }}"
+
+    - name: Run start-all.sh
+      command: ./start-all.sh -d prometheus_data
+      args:
+        chdir: "{{ scylla_monitoring_path }}"
