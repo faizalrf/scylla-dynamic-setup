@@ -5,7 +5,11 @@
   gather_facts: yes
   vars:
     scylla_version: "6.0"
-    device_path: "/dev/nvme0n1"  # Device path for IO setup
+    device_path: # Device path for IO setup
+      - /dev/nvme0n1
+      - /dev/nvme0n2
+      - /dev/nvme0n3
+      - /dev/nvme0n4
     scylla_setup_marker: "/etc/scylla_setup_done"  # Path to marker file
     scylla_config: "/etc/scylla/scylla.yaml"  # Path to ScyllaDB config file
     scylla_backup: "/etc/scylla/scylla.yaml.bak"  # Path to ScyllaDB backup config file
@@ -44,7 +48,7 @@
       register: scylla_setup_done
 
     - name: Run scylla_setup on all nodes
-      shell: sudo scylla_setup --disks {{ device_path }} --online-discard 1 --nic {{ ansible_default_ipv4.interface }} --io-setup 1 --no-fstrim-setup --no-coredump-setup
+      shell: scylla_setup --disks {{ device_path | join(',') }} --online-discard 1 --nic {{ ansible_default_ipv4.interface }} --io-setup 1 --no-fstrim-setup --no-coredump-setup
       when: not scylla_setup_done.stat.exists
 
     - name: Create scylla_setup marker file

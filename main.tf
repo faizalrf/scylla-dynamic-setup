@@ -212,3 +212,9 @@ output "zones" {
   value = [for instance in google_compute_instance.scylla-node : instance.zone]
   description = "Zones (also RACKs) where the instances are deployed"
 }
+
+# Output the NVME disks 
+output "nvme_device_paths" {
+  value       = [for i in range(var.nvme_disk_count) : "/dev/nvme${i}n1"]
+  description = "NVMe device paths"
+}

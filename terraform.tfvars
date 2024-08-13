@@ -3,7 +3,7 @@ region     = "asia-southeast1"
 node_count = 3
 hardware_type = "n2-highmem-4"
 name_prefix = "scylla-tablet-test"
-nvme_disk_count = 2
+nvme_disk_count = 4
 
 ### Monitor Node config
 monitor_node_count = 1
